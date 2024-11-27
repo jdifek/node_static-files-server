@@ -6,45 +6,65 @@ function createServer() {
   return http.createServer((req, res) => {
     const reUrl = new URL(req.url, `http://${req.headers.host}`);
 
-    if (reUrl.pathname.includes('..')) {
-      res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('Bad request: Path traversal not allowed');
-
-      return;
-    }
-
+    // Проверка на наличие '/file/' в пути
     if (!reUrl.pathname.startsWith('/file/')) {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('Please use /file/ to request files.');
+      res.end('Пожалуйста, используйте /file/ для запроса файлов.');
 
       return;
     }
 
-    const filePath = path.resolve(
-      __dirname,
-      'public',
-      reUrl.pathname.replace('/file/', ''),
-    );
+    // Удаляем '/file/' из пути
+    const requestedPath = reUrl.pathname.replace('/file/', '');
+    const publicDir = path.resolve(__dirname, 'public');
+    const filePath = path.join(publicDir, requestedPath);
 
-    if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-      const fileExtension = path.extname(filePath).toLowerCase();
-      let contentType = 'application/octet-stream';
+    // Проверка на попытку обхода каталога
+    if (!filePath.startsWith(publicDir)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Неверный запрос: обход каталога не разрешен');
 
-      // Set the correct content type based on the file extension
-      if (fileExtension === '.html') {
-        contentType = 'text/html';
-      } else if (fileExtension === '.css') {
-        contentType = 'text/css';
-      } else if (fileExtension === '.js') {
-        contentType = 'application/javascript';
-      }
-
-      res.writeHead(200, { 'Content-Type': contentType });
-      fs.createReadStream(filePath).pipe(res);
-    } else {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('File not found');
+      return;
     }
+
+    // Обработка запроса
+    fs.promises
+      .stat(filePath)
+      .then((stats) => {
+        if (!stats.isFile()) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Файл не найден');
+
+          return;
+        }
+
+        // Определение типа контента
+        const fileExtension = path.extname(filePath).toLowerCase();
+        let contentType = 'application/octet-stream';
+
+        if (fileExtension === '.html') {
+          contentType = 'text/html';
+        } else if (fileExtension === '.css') {
+          contentType = 'text/css';
+        } else if (fileExtension === '.js') {
+          contentType = 'application/javascript';
+        }
+
+        res.writeHead(200, { 'Content-Type': contentType });
+
+        const readStream = fs.createReadStream(filePath);
+
+        readStream.pipe(res);
+      })
+      .catch((error) => {
+        if (error.code === 'ENOENT') {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Файл не найден');
+        } else {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Внутренняя ошибка сервера');
+        }
+      });
   });
 }
 
